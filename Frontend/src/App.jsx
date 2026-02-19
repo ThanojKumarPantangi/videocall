@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {AnimatePresence } from "framer-motion";
+import {motion,AnimatePresence } from "framer-motion";
 import { Phone, Copy, PhoneOff, Sun, Moon, Video, Focus } from "lucide-react";
 import Peer from "simple-peer";
 import { io } from "socket.io-client";
