@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import {AnimatePresence } from "framer-motion";
 import { Phone, Copy, PhoneOff, Sun, Moon, Video, Focus } from "lucide-react";
 import Peer from "simple-peer";
 import { io } from "socket.io-client";
@@ -60,8 +60,18 @@ export default function App() {
       stream,
       config: {
         iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:global.stun.twilio.com:3478" },
+
           {
-            urls: "stun:stun.l.google.com:19302"
+            urls: "turn:openrelay.metered.ca:80",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:443",
+            username: "openrelayproject",
+            credential: "openrelayproject",
           }
         ]
       }
@@ -97,8 +107,18 @@ export default function App() {
       stream,
       config: {
         iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:global.stun.twilio.com:3478" },
+
           {
-            urls: "stun:stun.l.google.com:19302"
+            urls: "turn:openrelay.metered.ca:80",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+          {
+            urls: "turn:openrelay.metered.ca:443",
+            username: "openrelayproject",
+            credential: "openrelayproject",
           }
         ]
       }
