@@ -12,6 +12,7 @@ const socket = io("https://videocall-ch8w.onrender.com", {
 export default function App() {
   const [me, setMe] = useState("");
   const [stream, setStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null); // ✅ NEW
   const [receivingCall, setReceivingCall] = useState(false);
   const [caller, setCaller] = useState("");
   const [callerSignal, setCallerSignal] = useState(null);
@@ -25,49 +26,7 @@ export default function App() {
   const myVideo = useRef(null);
   const userVideo = useRef(null);
   const connectionRef = useRef(null);
-  // Track who we called so leaveCall can notify them
   const calledIdRef = useRef("");
-
-  useEffect(() => {
-  navigator.mediaDevices
-    .getUserMedia({ video: true, audio: true })
-    .then((currentStream) => {
-      setStream(currentStream);
-      // DON'T set srcObject here — let the dedicated useEffect below handle it
-    })
-    .catch((err) => {
-      console.error("Failed to get media devices:", err);
-      alert("Camera/Mic access denied. Please allow permissions and refresh.");
-    });
-
-  socket.on("me", (id) => setMe(id));
-
-  socket.on("callUser", ({ from, name: callerName, signal }) => {
-    setReceivingCall(true);
-    setCaller(from);
-    setName(callerName);
-    setCallerSignal(signal);
-  });
-
-  socket.on("callEnded", () => {
-    setCallEnded(true);
-    connectionRef.current?.destroy();
-    window.location.reload();
-  });
-
-  return () => {
-    socket.off("me");
-    socket.off("callUser");
-    socket.off("callEnded");
-  };
-}, []);
-
-// ✅ This reliably attaches your stream to your video element
-useEffect(() => {
-  if (myVideo.current && stream) {
-    myVideo.current.srcObject = stream;
-  }
-}, [stream]);
 
   const ICE_SERVERS = {
     iceServers: [
@@ -85,6 +44,54 @@ useEffect(() => {
       },
     ],
   };
+
+  // ✅ Get local media stream
+  useEffect(() => {
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: true })
+      .then((currentStream) => {
+        setStream(currentStream);
+      })
+      .catch((err) => {
+        console.error("Failed to get media devices:", err);
+        alert("Camera/Mic access denied. Please allow permissions and refresh.");
+      });
+
+    socket.on("me", (id) => setMe(id));
+
+    socket.on("callUser", ({ from, name: callerName, signal }) => {
+      setReceivingCall(true);
+      setCaller(from);
+      setName(callerName);
+      setCallerSignal(signal);
+    });
+
+    socket.on("callEnded", () => {
+      setCallEnded(true);
+      connectionRef.current?.destroy();
+      window.location.reload();
+    });
+
+    return () => {
+      socket.off("me");
+      socket.off("callUser");
+      socket.off("callEnded");
+    };
+  }, []);
+
+  // ✅ Attach local stream to video element once both are ready
+  useEffect(() => {
+    if (myVideo.current && stream) {
+      myVideo.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  // ✅ Attach remote stream to video element once both are ready
+  useEffect(() => {
+    if (userVideo.current && remoteStream) {
+      userVideo.current.srcObject = remoteStream;
+    }
+  }, [remoteStream, callAccepted]);
 
   const callUser = (id) => {
     calledIdRef.current = id;
@@ -105,15 +112,15 @@ useEffect(() => {
       });
     });
 
-    peer.on("stream", (remoteStream) => {
-      if (userVideo.current) userVideo.current.srcObject = remoteStream;
+    // ✅ Save to state instead of setting ref directly
+    peer.on("stream", (incoming) => {
+      setRemoteStream(incoming);
     });
 
     peer.on("error", (err) => {
       console.error("Peer error:", err);
     });
 
-    // Use socket.on + manual cleanup instead of socket.once to avoid missing the event
     const handleCallAccepted = (signal) => {
       setCallAccepted(true);
       peer.signal(signal);
@@ -139,8 +146,9 @@ useEffect(() => {
       socket.emit("answerCall", { signal: data, to: caller });
     });
 
-    peer.on("stream", (remoteStream) => {
-      if (userVideo.current) userVideo.current.srcObject = remoteStream;
+    // ✅ Save to state instead of setting ref directly
+    peer.on("stream", (incoming) => {
+      setRemoteStream(incoming);
     });
 
     peer.on("error", (err) => {
@@ -153,7 +161,6 @@ useEffect(() => {
 
   const leaveCall = () => {
     setCallEnded(true);
-    // Notify the other peer we are leaving
     const partnerId = calledIdRef.current || caller;
     if (partnerId) {
       socket.emit("endCall", { to: partnerId });
@@ -235,7 +242,12 @@ useEffect(() => {
                   layout
                 >
                   <span className="video-label">Remote User</span>
-                  <video playsInline autoPlay ref={userVideo} className="video-element" />
+                  <video
+                    playsInline
+                    autoPlay
+                    ref={userVideo}
+                    className="video-element"
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
