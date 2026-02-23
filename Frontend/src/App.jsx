@@ -9,10 +9,67 @@ const socket = io("https://videocall-ch8w.onrender.com", {
   transports: ["websocket"],
 });
 
+const ICE_SERVERS = {
+  iceServers: [
+    // Google STUN servers
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    { urls: "stun:stun4.l.google.com:19302" },
+
+    // Free TURN - OpenRelay
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:80?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+
+    // Free TURN - Numb backup
+    {
+      urls: "turn:numb.viagenie.ca",
+      username: "webrtc@live.com",
+      credential: "muazkh",
+    },
+
+    // Free TURN - Relay fallback
+    {
+      urls: "turn:relay.metered.ca:80",
+      username: "e8dd65f0310f632813da6b4b",
+      credential: "uWqFBFpnHKZMgQNi",
+    },
+    {
+      urls: "turn:relay.metered.ca:443",
+      username: "e8dd65f0310f632813da6b4b",
+      credential: "uWqFBFpnHKZMgQNi",
+    },
+    {
+      urls: "turn:relay.metered.ca:443?transport=tcp",
+      username: "e8dd65f0310f632813da6b4b",
+      credential: "uWqFBFpnHKZMgQNi",
+    },
+  ],
+};
+
 export default function App() {
   const [me, setMe] = useState("");
   const [stream, setStream] = useState(null);
-  const [remoteStream, setRemoteStream] = useState(null); // ✅ NEW
+  const [remoteStream, setRemoteStream] = useState(null);
   const [receivingCall, setReceivingCall] = useState(false);
   const [caller, setCaller] = useState("");
   const [callerSignal, setCallerSignal] = useState(null);
@@ -28,24 +85,7 @@ export default function App() {
   const connectionRef = useRef(null);
   const calledIdRef = useRef("");
 
-  const ICE_SERVERS = {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:global.stun.twilio.com:3478" },
-      {
-        urls: "turn:openrelay.metered.ca:80",
-        username: "openrelayproject",
-        credential: "openrelayproject",
-      },
-      {
-        urls: "turn:openrelay.metered.ca:443",
-        username: "openrelayproject",
-        credential: "openrelayproject",
-      },
-    ],
-  };
-
-  // ✅ Get local media stream
+  // Get local media stream
   useEffect(() => {
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
@@ -79,14 +119,14 @@ export default function App() {
     };
   }, []);
 
-  // ✅ Attach local stream to video element once both are ready
+  // Attach local stream to video element
   useEffect(() => {
     if (myVideo.current && stream) {
       myVideo.current.srcObject = stream;
     }
   }, [stream]);
 
-  // ✅ Attach remote stream to video element once both are ready
+  // Attach remote stream to video element once DOM is ready
   useEffect(() => {
     if (userVideo.current && remoteStream) {
       userVideo.current.srcObject = remoteStream;
@@ -98,7 +138,7 @@ export default function App() {
 
     const peer = new Peer({
       initiator: true,
-      trickle: false,
+      trickle: true,
       stream,
       config: ICE_SERVERS,
     });
@@ -112,14 +152,26 @@ export default function App() {
       });
     });
 
-    // ✅ Save to state instead of setting ref directly
     peer.on("stream", (incoming) => {
       setRemoteStream(incoming);
     });
 
-    peer.on("error", (err) => {
-      console.error("Peer error:", err);
+    peer.on("connect", () => {
+      console.log("✅ Peer connected successfully");
     });
+
+    peer.on("error", (err) => {
+      console.error("❌ Peer error:", err.message);
+    });
+
+    peer._pc.oniceconnectionstatechange = () => {
+      const state = peer._pc.iceConnectionState;
+      console.log("ICE State:", state);
+      if (state === "failed") {
+        console.warn("ICE failed — restarting...");
+        peer._pc.restartIce();
+      }
+    };
 
     const handleCallAccepted = (signal) => {
       setCallAccepted(true);
@@ -137,7 +189,7 @@ export default function App() {
 
     const peer = new Peer({
       initiator: false,
-      trickle: false,
+      trickle: true,
       stream,
       config: ICE_SERVERS,
     });
@@ -146,14 +198,26 @@ export default function App() {
       socket.emit("answerCall", { signal: data, to: caller });
     });
 
-    // ✅ Save to state instead of setting ref directly
     peer.on("stream", (incoming) => {
       setRemoteStream(incoming);
     });
 
-    peer.on("error", (err) => {
-      console.error("Peer error:", err);
+    peer.on("connect", () => {
+      console.log("✅ Peer connected successfully");
     });
+
+    peer.on("error", (err) => {
+      console.error("❌ Peer error:", err.message);
+    });
+
+    peer._pc.oniceconnectionstatechange = () => {
+      const state = peer._pc.iceConnectionState;
+      console.log("ICE State:", state);
+      if (state === "failed") {
+        console.warn("ICE failed — restarting...");
+        peer._pc.restartIce();
+      }
+    };
 
     peer.signal(callerSignal);
     connectionRef.current = peer;
@@ -208,7 +272,9 @@ export default function App() {
             <AnimatePresence mode="popLayout">
               {stream && (
                 <motion.div
-                  className={`video-wrapper ${callAccepted && !callEnded ? "secondary" : "primary"}`}
+                  className={`video-wrapper ${
+                    callAccepted && !callEnded ? "secondary" : "primary"
+                  }`}
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.8 }}
@@ -302,7 +368,10 @@ export default function App() {
                   <PhoneOff size={20} /> End Call
                 </button>
               ) : (
-                <button className="btn-primary" onClick={() => callUser(idToCall)}>
+                <button
+                  className="btn-primary"
+                  onClick={() => callUser(idToCall)}
+                >
                   <Phone size={20} /> Call Now
                 </button>
               )}
