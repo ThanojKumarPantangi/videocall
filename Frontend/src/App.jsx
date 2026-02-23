@@ -29,39 +29,45 @@ export default function App() {
   const calledIdRef = useRef("");
 
   useEffect(() => {
-    navigator.mediaDevices
-      .getUserMedia({ video: true, audio: true })
-      .then((currentStream) => {
-        setStream(currentStream);
-        if (myVideo.current) myVideo.current.srcObject = currentStream;
-      })
-      .catch((err) => {
-        console.error("Failed to get media devices:", err);
-      });
-
-    // Handles reconnects where socket ID may change
-    socket.on("me", (id) => setMe(id));
-
-    socket.on("callUser", ({ from, name: callerName, signal }) => {
-      setReceivingCall(true);
-      setCaller(from);
-      setName(callerName);
-      setCallerSignal(signal);
+  navigator.mediaDevices
+    .getUserMedia({ video: true, audio: true })
+    .then((currentStream) => {
+      setStream(currentStream);
+      // DON'T set srcObject here — let the dedicated useEffect below handle it
+    })
+    .catch((err) => {
+      console.error("Failed to get media devices:", err);
+      alert("Camera/Mic access denied. Please allow permissions and refresh.");
     });
 
-    // Handle remote peer hanging up
-    socket.on("callEnded", () => {
-      setCallEnded(true);
-      connectionRef.current?.destroy();
-      window.location.reload();
-    });
+  socket.on("me", (id) => setMe(id));
 
-    return () => {
-      socket.off("me");
-      socket.off("callUser");
-      socket.off("callEnded");
-    };
-  }, []);
+  socket.on("callUser", ({ from, name: callerName, signal }) => {
+    setReceivingCall(true);
+    setCaller(from);
+    setName(callerName);
+    setCallerSignal(signal);
+  });
+
+  socket.on("callEnded", () => {
+    setCallEnded(true);
+    connectionRef.current?.destroy();
+    window.location.reload();
+  });
+
+  return () => {
+    socket.off("me");
+    socket.off("callUser");
+    socket.off("callEnded");
+  };
+}, []);
+
+// ✅ This reliably attaches your stream to your video element
+useEffect(() => {
+  if (myVideo.current && stream) {
+    myVideo.current.srcObject = stream;
+  }
+}, [stream]);
 
   const ICE_SERVERS = {
     iceServers: [
