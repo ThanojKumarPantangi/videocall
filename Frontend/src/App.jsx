@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {motion,AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Phone, Copy, PhoneOff, Sun, Moon, Video, Focus } from "lucide-react";
 import Peer from "simple-peer";
 import { io } from "socket.io-client";
@@ -10,7 +10,6 @@ const socket = io("https://videocall-ch8w.onrender.com", {
 });
 
 export default function App() {
-  // --- ORIGINAL WEBRTC STATE (UNTOUCHED) ---
   const [me, setMe] = useState("");
   const [stream, setStream] = useState(null);
   const [receivingCall, setReceivingCall] = useState(false);
@@ -21,60 +20,74 @@ export default function App() {
   const [idToCall, setIdToCall] = useState("");
   const [name, setName] = useState("");
   const [isBlurred, setIsBlurred] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(true);
 
   const myVideo = useRef(null);
   const userVideo = useRef(null);
   const connectionRef = useRef(null);
+  // Track who we called so leaveCall can notify them
+  const calledIdRef = useRef("");
 
-  // --- NEW UI STATE ---
-  const [isDarkMode, setIsDarkMode] = useState(true);
-
-  // --- ORIGINAL LOGIC (UNTOUCHED) ---
   useEffect(() => {
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
       .then((currentStream) => {
         setStream(currentStream);
         if (myVideo.current) myVideo.current.srcObject = currentStream;
+      })
+      .catch((err) => {
+        console.error("Failed to get media devices:", err);
       });
 
-    socket.on("me", setMe);
+    // Handles reconnects where socket ID may change
+    socket.on("me", (id) => setMe(id));
 
-    socket.on("callUser", ({ from, name, signal }) => {
+    socket.on("callUser", ({ from, name: callerName, signal }) => {
       setReceivingCall(true);
       setCaller(from);
-      setName(name);
+      setName(callerName);
       setCallerSignal(signal);
+    });
+
+    // Handle remote peer hanging up
+    socket.on("callEnded", () => {
+      setCallEnded(true);
+      connectionRef.current?.destroy();
+      window.location.reload();
     });
 
     return () => {
       socket.off("me");
       socket.off("callUser");
+      socket.off("callEnded");
     };
   }, []);
 
+  const ICE_SERVERS = {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:global.stun.twilio.com:3478" },
+      {
+        urls: "turn:openrelay.metered.ca:80",
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      },
+      {
+        urls: "turn:openrelay.metered.ca:443",
+        username: "openrelayproject",
+        credential: "openrelayproject",
+      },
+    ],
+  };
+
   const callUser = (id) => {
+    calledIdRef.current = id;
+
     const peer = new Peer({
       initiator: true,
       trickle: false,
       stream,
-      config: {
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:global.stun.twilio.com:3478" },
-
-          {
-            urls: "turn:openrelay.metered.ca:80",
-            username: "openrelayproject",
-            credential: "openrelayproject",
-          },
-          {
-            urls: "turn:openrelay.metered.ca:443",
-            username: "openrelayproject",
-            credential: "openrelayproject",
-          }
-        ]
-      }
+      config: ICE_SERVERS,
     });
 
     peer.on("signal", (data) => {
@@ -87,41 +100,33 @@ export default function App() {
     });
 
     peer.on("stream", (remoteStream) => {
-      userVideo.current.srcObject = remoteStream;
+      if (userVideo.current) userVideo.current.srcObject = remoteStream;
     });
 
-    socket.once("callAccepted", (signal) => {
+    peer.on("error", (err) => {
+      console.error("Peer error:", err);
+    });
+
+    // Use socket.on + manual cleanup instead of socket.once to avoid missing the event
+    const handleCallAccepted = (signal) => {
       setCallAccepted(true);
       peer.signal(signal);
-    });
+      socket.off("callAccepted", handleCallAccepted);
+    };
+    socket.on("callAccepted", handleCallAccepted);
 
     connectionRef.current = peer;
   };
 
   const answerCall = () => {
     setCallAccepted(true);
+    calledIdRef.current = caller;
 
     const peer = new Peer({
       initiator: false,
       trickle: false,
       stream,
-      config: {
-        iceServers: [
-          { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:global.stun.twilio.com:3478" },
-
-          {
-            urls: "turn:openrelay.metered.ca:80",
-            username: "openrelayproject",
-            credential: "openrelayproject",
-          },
-          {
-            urls: "turn:openrelay.metered.ca:443",
-            username: "openrelayproject",
-            credential: "openrelayproject",
-          }
-        ]
-      }
+      config: ICE_SERVERS,
     });
 
     peer.on("signal", (data) => {
@@ -129,7 +134,11 @@ export default function App() {
     });
 
     peer.on("stream", (remoteStream) => {
-      userVideo.current.srcObject = remoteStream;
+      if (userVideo.current) userVideo.current.srcObject = remoteStream;
+    });
+
+    peer.on("error", (err) => {
+      console.error("Peer error:", err);
     });
 
     peer.signal(callerSignal);
@@ -138,11 +147,15 @@ export default function App() {
 
   const leaveCall = () => {
     setCallEnded(true);
+    // Notify the other peer we are leaving
+    const partnerId = calledIdRef.current || caller;
+    if (partnerId) {
+      socket.emit("endCall", { to: partnerId });
+    }
     connectionRef.current?.destroy();
     window.location.reload();
   };
 
-  // --- NEW ANIMATION VARIANTS ---
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: { opacity: 1, transition: { staggerChildren: 0.1 } },
@@ -155,7 +168,7 @@ export default function App() {
 
   return (
     <div className={`app-wrapper ${isDarkMode ? "dark-theme" : "light-theme"}`}>
-      <motion.div 
+      <motion.div
         className="app-container"
         variants={containerVariants}
         initial="hidden"
@@ -167,8 +180,8 @@ export default function App() {
             <Video size={28} className="logo-icon" />
             <h1>ConnectNow</h1>
           </div>
-          <button 
-            className="icon-button theme-toggle" 
+          <button
+            className="icon-button theme-toggle"
             onClick={() => setIsDarkMode(!isDarkMode)}
             aria-label="Toggle Theme"
           >
@@ -181,8 +194,8 @@ export default function App() {
           <motion.div className="video-section" variants={itemVariants}>
             <AnimatePresence mode="popLayout">
               {stream && (
-                <motion.div 
-                  className={`video-wrapper ${callAccepted && !callEnded ? 'secondary' : 'primary'}`}
+                <motion.div
+                  className={`video-wrapper ${callAccepted && !callEnded ? "secondary" : "primary"}`}
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.8 }}
@@ -197,7 +210,7 @@ export default function App() {
                     className="video-element"
                     style={{ filter: isBlurred ? "blur(12px)" : "none" }}
                   />
-                  <button 
+                  <button
                     className="floating-btn blur-btn"
                     onClick={() => setIsBlurred(!isBlurred)}
                     title={isBlurred ? "Unblur Background" : "Blur Background"}
@@ -208,7 +221,7 @@ export default function App() {
               )}
 
               {callAccepted && !callEnded && (
-                <motion.div 
+                <motion.div
                   className="video-wrapper primary"
                   initial={{ opacity: 0, x: 50 }}
                   animate={{ opacity: 1, x: 0 }}
@@ -243,7 +256,11 @@ export default function App() {
               <label>Your ID</label>
               <div className="copy-box">
                 <span className="id-text">{me || "Generating..."}</span>
-                <button className="icon-button" onClick={() => navigator.clipboard.writeText(me)} title="Copy ID">
+                <button
+                  className="icon-button"
+                  onClick={() => navigator.clipboard.writeText(me)}
+                  title="Copy ID"
+                >
                   <Copy size={18} />
                 </button>
               </div>
@@ -278,8 +295,13 @@ export default function App() {
         {/* INCOMING CALL MODAL */}
         <AnimatePresence>
           {receivingCall && !callAccepted && (
-            <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <motion.div 
+            <motion.div
+              className="modal-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <motion.div
                 className="caller-modal"
                 initial={{ y: 50, scale: 0.9, opacity: 0 }}
                 animate={{ y: 0, scale: 1, opacity: 1 }}
